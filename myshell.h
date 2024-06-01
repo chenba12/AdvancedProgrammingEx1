@@ -53,4 +53,15 @@ void add_to_history(const char *command);
 
 void handle_arrow_key(char direction, char *buffer, int *index);
 
+void setup_signal_handling();
+
+void handle_variable_assignment(char *command, VariableArray *var_array);
+
+void
+handle_if_else_fi(char *command, char **args, int *inside_if, int *then_block, int *else_block, int *last_exit_status,
+                  char *then_command, char *else_command, int append, int stderr_redirect, char *outfile);
+
+void execute_if_command(char **args, int *last_exit_status);
+
+
 #endif //ADVANCEDPROGRAMMINGEX1_MYSHELL_H

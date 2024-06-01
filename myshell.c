@@ -40,18 +40,10 @@ int main() {
     char then_command[BUFFER_SIZE] = "";
     char else_command[BUFFER_SIZE] = "";
 
-    struct sigaction sa;
-    sa.sa_handler = sigint_handler;
-    sa.sa_flags = SA_RESTART;
-    sigemptyset(&sa.sa_mask);
-
+    setup_signal_handling();
     VariableArray var_array;
     init_variable_array(&var_array);
 
-    if (sigaction(SIGINT, &sa, NULL) == -1) {
-        perror("sigaction");
-        exit(EXIT_FAILURE);
-    }
 
     while (1) {
         print_prompt();
@@ -172,7 +164,16 @@ int main() {
     return 0;
 }
 
-
+void setup_signal_handling() {
+    struct sigaction sa;
+    sa.sa_handler = sigint_handler;
+    sa.sa_flags = SA_RESTART;
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(SIGINT, &sa, NULL) == -1) {
+        perror("sigaction");
+        exit(EXIT_FAILURE);
+    }
+}
 
 void change_prompt(char **args) {
     // Clear the current prompt
