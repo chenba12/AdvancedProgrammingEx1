@@ -18,83 +18,10 @@
 char history[MAX_HISTORY_SIZE][BUFFER_SIZE];
 int history_index = 0;
 int current_history_pos = 0;
+
 char prompt[BUFFER_SIZE] = "hello:";
 
-void print_prompt() {
-    printf("\r%s ", prompt);
-    fflush(stdout);
-}
 
-void enableRawMode() {
-    struct termios raw;
-    tcgetattr(STDIN_FILENO, &raw);
-    raw.c_lflag &= ~(ECHO | ICANON);
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
-}
-void disableRawMode() {
-    struct termios raw;
-    tcgetattr(STDIN_FILENO, &raw);
-    raw.c_lflag |= (ECHO | ICANON);
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
-}
-
-int read_input(char *buffer) {
-    enableRawMode();
-
-    int index = 0;
-    current_history_pos = history_index; // Reset current history position
-
-    while (1) {
-        fflush(stdout);
-        int c = getchar();
-
-        if (c == '\r' || c == '\n') {
-            buffer[index] = '\0';
-            printf("\n");
-            break;
-        } else if (c == 127 || c == '\b') {  // Handle backspace
-            if (index > 0) {
-                buffer[--index] = '\0';
-                printf("\b \b");
-            }
-        } else if (c == 27) {  // Escape sequence
-            if (getchar() == '[') {
-                c = getchar();
-                if (c == 'A') {  // Up arrow
-                    if (current_history_pos > 0) {
-                        current_history_pos = (current_history_pos - 1 + MAX_HISTORY_SIZE) % MAX_HISTORY_SIZE;
-                        strcpy(buffer, history[current_history_pos]);
-                        index = strlen(buffer);
-                        // Clear the current line
-                        printf("\33[2K\r");
-                        print_prompt();
-                        printf("%s", buffer);
-                        fflush(stdout);
-                    }
-                } else if (c == 'B') {  // Down arrow
-                    if (current_history_pos < history_index) {
-                        current_history_pos = (current_history_pos + 1) % MAX_HISTORY_SIZE;
-                        strcpy(buffer, history[current_history_pos]);
-                        index = strlen(buffer);
-                        // Clear the current line
-                        printf("\33[2K\r");
-                        print_prompt();
-                        printf("%s", buffer);
-                        fflush(stdout);
-                    }
-                }
-                continue;
-            }
-        } else {
-            buffer[index++] = c;
-            printf("%c", c);
-        }
-        fflush(stdout);
-    }
-
-    disableRawMode();
-    return index;
-}
 
 
 
@@ -150,15 +77,7 @@ int main() {
 
         command[index] = '\0';
 
-        if (history_index < MAX_HISTORY_SIZE) {
-            strcpy(history[history_index++], command);
-        } else {
-            // If history is full, shift all commands up and add the new command at the end
-            for (int i = 1; i < MAX_HISTORY_SIZE; i++) {
-                strcpy(history[i - 1], history[i]);
-            }
-            strcpy(history[MAX_HISTORY_SIZE - 1], command);
-        }
+        add_to_history(command);
 
         if (strcmp(command, "!!") != 0) {
             strcpy(last_command, command);
@@ -514,4 +433,106 @@ void execute_read_command(char **args, VariableArray *var_array) {
     } else {
         fprintf(stderr, "read: failed to read input\n");
     }
+}
+
+void print_prompt() {
+    printf("\r%s ", prompt);
+    fflush(stdout);
+}
+
+void add_to_history(const char *command) {
+    if (history_index < MAX_HISTORY_SIZE) {
+        strcpy(history[history_index++], command);
+    } else {
+        // If history is full, shift all commands up and add the new command at the end
+        for (int i = 1; i < MAX_HISTORY_SIZE; i++) {
+            strcpy(history[i - 1], history[i]);
+        }
+        strcpy(history[MAX_HISTORY_SIZE - 1], command);
+    }
+    current_history_pos = history_index;
+}
+
+void enableRawMode() {
+    struct termios raw;
+    tcgetattr(STDIN_FILENO, &raw);
+    raw.c_lflag &= ~(ECHO | ICANON);
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+}
+
+void disableRawMode() {
+    struct termios raw;
+    tcgetattr(STDIN_FILENO, &raw);
+    raw.c_lflag |= (ECHO | ICANON);
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+}
+
+void handle_arrow_key(char direction, char *buffer, int *index) {
+    if (direction == 'A') {  // Up arrow
+        if (current_history_pos > 0) {
+            current_history_pos--;
+            strcpy(buffer, history[current_history_pos]);
+            *index = strlen(buffer);
+            // Clear the current line
+            printf("\33[2K\r");
+            print_prompt();
+            printf("%s", buffer);
+            fflush(stdout);
+        }
+    } else if (direction == 'B') {  // Down arrow
+        if (current_history_pos < history_index - 1) {
+            current_history_pos++;
+            strcpy(buffer, history[current_history_pos]);
+            *index = strlen(buffer);
+            // Clear the current line
+            printf("\33[2K\r");
+            print_prompt();
+            printf("%s", buffer);
+            fflush(stdout);
+        } else if (current_history_pos == history_index - 1) {
+            current_history_pos++;
+            buffer[0] = '\0';
+            *index = 0;
+            // Clear the current line
+            printf("\33[2K\r");
+            print_prompt();
+            fflush(stdout);
+        }
+    }
+}
+
+int read_input(char *buffer) {
+    enableRawMode();
+
+    int index = 0;
+    current_history_pos = history_index; // Reset current history position
+
+    while (1) {
+        fflush(stdout);
+        int c = getchar();
+
+        if (c == '\r' || c == '\n') {
+            buffer[index] = '\0';
+            printf("\n");
+            break;
+        } else if (c == 127 || c == '\b') {  // Handle backspace
+            if (index > 0) {
+                buffer[--index] = '\0';
+                printf("\b \b");
+            }
+        } else if (c == 27) {  // Escape sequence
+            if (getchar() == '[') {
+                c = getchar();
+                handle_arrow_key(c, buffer, &index);
+                continue;
+            }
+        } else {
+            buffer[index++] = c;
+            printf("%c", c);
+        }
+        fflush(stdout);
+    }
+
+    disableRawMode();
+    return index;
 }

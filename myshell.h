@@ -27,7 +27,7 @@ void execute_cd(char **args);
 
 void sigint_handler(int sig);
 
-void execute_pipeline(char *command,int print);
+void execute_pipeline(char *command, int print);
 
 void init_variable_array(VariableArray *array);
 
@@ -35,7 +35,7 @@ void resize_variable_array(VariableArray *array);
 
 void set_variable(VariableArray *array, const char *name, const char *value);
 
-char* get_variable(VariableArray *array, const char *name);
+char *get_variable(VariableArray *array, const char *name);
 
 void substitute_variables(char *command, VariableArray *var_array);
 
@@ -47,6 +47,10 @@ void disableRawMode();
 
 void print_prompt();
 
+int read_input(char *buffer);
 
+void add_to_history(const char *command);
+
+void handle_arrow_key(char direction, char *buffer, int *index);
 
 #endif //ADVANCEDPROGRAMMINGEX1_MYSHELL_H
