@@ -4,7 +4,6 @@ project(AdvancedProgrammingEx1 C)
 set(CMAKE_C_STANDARD 11)
 
 add_executable(AdvancedProgrammingEx1
-        key.c
         myshell.c
         myshell.h
         message.c)

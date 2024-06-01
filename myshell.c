@@ -22,30 +22,8 @@ int current_history_pos = 0;
 char prompt[BUFFER_SIZE] = "hello:";
 
 
-
-
-
 void execute_if_command(char **args, int *last_exit_status) {
-    // Execute the pipeline and store the exit status
-    execute_pipeline(*(args + 1), 1);
-}
-
-void execute_then_command(char **args, int *last_exit_status) {
-    // If the last exit status is 0 (true), execute the command
-    if (*last_exit_status == 0) {
-        execute_external_command(args + 1, 0, 0, NULL, last_exit_status);
-    }
-}
-
-void execute_else_command(char **args, int *last_exit_status) {
-    // If the last exit status is non-zero (false), execute the command
-    if (*last_exit_status != 0) {
-        execute_external_command(args + 1, 0, 0, NULL, last_exit_status);
-    }
-}
-
-void execute_fi_command(char **args, int *last_exit_status) {
-    // Do nothing for 'fi', it just marks the end of the if-then-else block
+    execute_pipeline(args[1], last_exit_status, 1);
 }
 
 int main() {
@@ -56,6 +34,11 @@ int main() {
     int append = 0;
     int stderr_redirect = 0;
     char last_command[BUFFER_SIZE] = "";
+    int inside_if = 0;
+    int then_block = 0;
+    int else_block = 0;
+    char then_command[BUFFER_SIZE] = "";
+    char else_command[BUFFER_SIZE] = "";
 
     struct sigaction sa;
     sa.sa_handler = sigint_handler;
@@ -89,7 +72,6 @@ int main() {
             }
             printf("%s\n", last_command);
             strcpy(command, last_command);
-            continue;
         }
 
         // Check for variable assignment
@@ -104,25 +86,78 @@ int main() {
         substitute_variables(command, &var_array);
 
         if (strchr(command, '|') != NULL && strstr(command, "if") == NULL) {
-            execute_pipeline(command, 1);
+            execute_pipeline(command, &last_exit_status, 1);
         } else {
             parse_input(command, args, &append, &stderr_redirect, &outfile);
             if (args[0] == NULL) continue;
+
+            if (strcmp(args[0], "if") == 0) {
+                inside_if = 1;
+                then_block = 0;
+                else_block = 0;
+                then_command[0] = '\0';
+                else_command[0] = '\0';
+                execute_if_command(args, &last_exit_status);
+                continue;
+            }
+
+            if (inside_if) {
+                if (strcmp(args[0], "then") == 0) {
+                    then_block = 1;
+                    else_block = 0;
+                    continue;
+                } else if (strcmp(args[0], "else") == 0) {
+                    else_block = 1;
+                    then_block = 0;
+                    continue;
+                } else if (strcmp(args[0], "fi") == 0) {
+                    inside_if = 0;
+                    then_block = 0;
+                    else_block = 0;
+
+                    if (last_exit_status == 0) {
+                        char *line = strtok(then_command, "\n");
+                        while (line != NULL) {
+                            parse_input(line, args, &append, &stderr_redirect, &outfile);
+                            execute_external_command(args, append, stderr_redirect, outfile, &last_exit_status);
+                            line = strtok(NULL, "\n");
+                        }
+                    } else {
+                        char *line = strtok(else_command, "\n");
+                        while (line != NULL) {
+                            parse_input(line, args, &append, &stderr_redirect, &outfile);
+                            execute_external_command(args, append, stderr_redirect, outfile, &last_exit_status);
+                            line = strtok(NULL, "\n");
+                        }
+                    }
+                    continue;
+                } else {
+                    char temp_command[BUFFER_SIZE] = "";
+                    for (int i = 0; args[i] != NULL; i++) {
+                        strcat(temp_command, args[i]);
+                        strcat(temp_command, " ");
+                    }
+                    if (then_block) {
+                        strcat(then_command, temp_command);
+                        strcat(then_command, "\n");
+
+                    } else if (else_block) {
+                        strcat(else_command, temp_command);
+                        strcat(else_command, "\n");
+                    }
+                    continue;
+                }
+            }
+
             if (strcmp(args[0], "prompt") == 0 && args[1] && strcmp(args[1], "=") == 0 && args[2]) {
                 change_prompt(args);
                 continue;
-            } else if (strcmp(args[0], "if") == 0) {
-                execute_if_command(args, &last_exit_status);
-            } else if (strcmp(args[0], "then") == 0) {
-                execute_then_command(args, &last_exit_status);
-            } else if (strcmp(args[0], "else") == 0) {
-                execute_else_command(args, &last_exit_status);
-            } else if (strcmp(args[0], "fi") == 0) {
-                execute_fi_command(args, &last_exit_status);
-            } else if ((strcmp(args[0], "echo") == 0) && (args[1] != NULL) && strcmp(args[1], "$?") == 0) {
-                printf("%d\n", last_exit_status);
             } else if (strcmp(args[0], "echo") == 0) {
-                execute_echo(args);
+                if (args[1] != NULL && strcmp(args[1], "$?") == 0) {
+                    printf("%d\n", last_exit_status);
+                } else {
+                    execute_echo(args);
+                }
             } else if (strcmp(args[0], "cd") == 0) {
                 execute_cd(args);
             } else if (strcmp(args[0], "read") == 0) {
@@ -136,6 +171,8 @@ int main() {
     }
     return 0;
 }
+
+
 
 void change_prompt(char **args) {
     // Clear the current prompt
@@ -243,7 +280,7 @@ void execute_external_command(char **args, int append, int stderr_redirect, char
     }
 }
 
-void execute_pipeline(char *command, int print) {
+void execute_pipeline(char *command, int *last_exit_status, int silent) {
     char *commands[BUFFER_SIZE];
     int num_pipes = 0;
 
@@ -252,7 +289,7 @@ void execute_pipeline(char *command, int print) {
         num_pipes++;
     }
 
-    int *pipefds = (int *)malloc(2 * (num_pipes - 1) * sizeof(int));
+    int *pipefds = (int *) malloc(2 * (num_pipes - 1) * sizeof(int));
     if (pipefds == NULL) {
         perror("malloc");
         exit(EXIT_FAILURE);
@@ -269,7 +306,7 @@ void execute_pipeline(char *command, int print) {
     int pid;
     int j = 0;
     int fd[2];
-    if (!print) {
+    if (silent) {
         if (pipe(fd) == -1) {
             perror("pipe");
             exit(EXIT_FAILURE);
@@ -294,7 +331,7 @@ void execute_pipeline(char *command, int print) {
                     free(pipefds);
                     exit(EXIT_FAILURE);
                 }
-            } else if (!print) {
+            } else if (silent) {
                 if (dup2(fd[1], 1) == -1) {
                     perror("dup2");
                     exit(EXIT_FAILURE);
@@ -329,22 +366,22 @@ void execute_pipeline(char *command, int print) {
         close(pipefds[i]);
     }
 
-    if (!print) {
+    if (silent) {
         close(fd[1]);
         char buffer[BUFFER_SIZE];
         int nbytes;
         while ((nbytes = read(fd[0], buffer, sizeof(buffer) - 1)) > 0) {
             buffer[nbytes] = '\0';
-            printf("%s", buffer);
         }
         close(fd[0]);
     }
 
     // Wait for all child processes
     for (int i = 0; i < num_pipes; i++) {
-        wait(NULL);
+        waitpid(pid, last_exit_status, 0);
     }
 
+    *last_exit_status = WEXITSTATUS(*last_exit_status);
     free(pipefds);
 }
 

@@ -27,7 +27,7 @@ void execute_cd(char **args);
 
 void sigint_handler(int sig);
 
-void execute_pipeline(char *command, int print);
+void execute_pipeline(char *command, int *last_exit_status, int silent);
 
 void init_variable_array(VariableArray *array);
 
