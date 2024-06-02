@@ -64,6 +64,7 @@ int main() {
             }
             printf("%s\n", last_command);
             strcpy(command, last_command);
+            continue;
         }
 
         // Check for variable assignment
@@ -76,9 +77,8 @@ int main() {
             continue;
         }
         substitute_variables(command, &var_array);
-
         if (strchr(command, '|') != NULL && strstr(command, "if") == NULL) {
-            execute_pipeline(command, &last_exit_status, 1);
+            execute_pipeline(command, &last_exit_status, 0);
         } else {
             parse_input(command, args, &append, &stderr_redirect, &outfile);
             if (args[0] == NULL) continue;
@@ -282,6 +282,7 @@ void execute_external_command(char **args, int append, int stderr_redirect, char
 }
 
 void execute_pipeline(char *command, int *last_exit_status, int silent) {
+    printf("heyyy\n");
     char *commands[BUFFER_SIZE];
     int num_pipes = 0;
 
@@ -307,6 +308,7 @@ void execute_pipeline(char *command, int *last_exit_status, int silent) {
     int pid;
     int j = 0;
     int fd[2];
+
     if (silent) {
         if (pipe(fd) == -1) {
             perror("pipe");
@@ -366,7 +368,6 @@ void execute_pipeline(char *command, int *last_exit_status, int silent) {
     for (int i = 0; i < 2 * (num_pipes - 1); i++) {
         close(pipefds[i]);
     }
-
     if (silent) {
         close(fd[1]);
         char buffer[BUFFER_SIZE];
