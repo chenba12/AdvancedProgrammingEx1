@@ -652,7 +652,18 @@ int readInput(char *buffer) {
         fflush(stdout);
         int c = getchar();
 
-        if (c == '\r' || c == '\n') {
+        if (c == 4) {  // ASCII value for Ctrl+D
+            if (index == 0) {
+                // If index is 0, it means Ctrl+D was pressed on an empty line
+                printf("\n");
+                disableRawMode();
+                exit(0); // Exit the shell
+            } else {
+                // If index is not 0, it means Ctrl+D was pressed after some input
+                buffer[index] = '\0';
+                break;
+            }
+        } else if (c == '\r' || c == '\n') {
             buffer[index] = '\0';
             printf("\n");
             break;
@@ -664,8 +675,10 @@ int readInput(char *buffer) {
         } else if (c == 27) {  // Escape sequence
             if (getchar() == '[') {
                 c = getchar();
-                handleArrowKey(c, buffer, &index);
-                continue;
+                if (c == 'A' || c == 'B') {
+                    handleArrowKey(c, buffer, &index);
+                }
+                continue;  // Skip printing the arrow key characters
             }
         } else {
             buffer[index++] = c;
