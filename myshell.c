@@ -22,8 +22,21 @@ int current_history_pos = 0;
 char prompt[BUFFER_SIZE] = "hello:";
 
 
-void execute_if_command(char **args, int *last_exit_status) {
-    execute_pipeline(args[1], last_exit_status, 1);
+void executeIfCommand(char **args, char *outfile, char *infile, int append, int stderr_redirect, int background,
+                      int *last_exit_status) {
+    int contains_pipe = 0;
+    for (int i = 0; args[i] != NULL; ++i) {
+        if (strchr(args[i], '|') != NULL) {
+            contains_pipe = 1;
+            break;
+        }
+    }
+    if (contains_pipe) {
+        executePipeline(args[1], last_exit_status, 1);
+    } else {
+        executeExternalCommand(&args[1], outfile, infile, append, stderr_redirect, background, last_exit_status, 1);
+    }
+
 }
 
 int main() {
@@ -31,8 +44,10 @@ int main() {
     char command[BUFFER_SIZE];
     char *args[MAX_ARGS] = {NULL};
     char *outfile = NULL;
+    char *infile = NULL;
     int append = 0;
     int stderr_redirect = 0;
+    int background = 0;
     char last_command[BUFFER_SIZE] = "";
     int inside_if = 0;
     int then_block = 0;
@@ -40,19 +55,19 @@ int main() {
     char then_command[BUFFER_SIZE] = "";
     char else_command[BUFFER_SIZE] = "";
 
-    setup_signal_handling();
+    setupSignalHandling();
     VariableArray var_array;
-    init_variable_array(&var_array);
+    initVariableArray(&var_array);
 
 
     while (1) {
-        print_prompt();
-        int index = read_input(command);  // Use read_input instead of fgets
+        printPrompt();
+        int index = readInput(command);  // Use readInput instead of fgets
         if (index == 0) continue;  // Handle empty input
 
         command[index] = '\0';
 
-        add_to_history(command);
+        addToHistory(command);
 
         if (strcmp(command, "!!") != 0) {
             strcpy(last_command, command);
@@ -72,16 +87,16 @@ int main() {
             char *name = strtok(command, " = ");
             char *value = strtok(NULL, " = ");
             if (name && value) {
-                set_variable(&var_array, name + 1, value); // name + 1 to skip the $
+                setVariable(&var_array, name + 1, value); // name + 1 to skip the $
             }
             continue;
         }
-        substitute_variables(command, &var_array);
-        if (strchr(command, '|') != NULL && strstr(command, "if") == NULL) {
-            execute_pipeline(command, &last_exit_status, 0);
+        substituteVariables(command, &var_array);
+        if (strchr(command, '|') != NULL && strstr(command, "if") == NULL && inside_if == 0) {
+            executePipeline(command, &last_exit_status, 0);
         } else {
-            parse_input(command, args, &append, &stderr_redirect, &outfile);
-            if (args[0] == NULL) continue;
+            int arg_count = parseInput(command, args, &outfile, &infile, &append, &stderr_redirect, &background);
+            if (arg_count == 0) continue;
 
             if (strcmp(args[0], "if") == 0) {
                 inside_if = 1;
@@ -89,7 +104,7 @@ int main() {
                 else_block = 0;
                 then_command[0] = '\0';
                 else_command[0] = '\0';
-                execute_if_command(args, &last_exit_status);
+                executeIfCommand(args, outfile, infile, append, stderr_redirect, background, &last_exit_status);
                 continue;
             }
 
@@ -108,18 +123,55 @@ int main() {
                     else_block = 0;
 
                     if (last_exit_status == 0) {
-                        char *line = strtok(then_command, "\n");
-                        while (line != NULL) {
-                            parse_input(line, args, &append, &stderr_redirect, &outfile);
-                            execute_external_command(args, append, stderr_redirect, outfile, &last_exit_status);
-                            line = strtok(NULL, "\n");
+                        if (strchr(then_command, '|') != NULL) {
+                            executePipeline(then_command, &last_exit_status, 0);
+                        } else {
+                            int len = strlen(then_command);
+                            char *copy = malloc(len + 1);
+                            strcpy(copy, then_command);
+                            char *line = strtok(then_command, " ");
+                            int count = 0;
+                            while (line != NULL) {
+                                count++;
+                                line = strtok(NULL, " ");
+                            }
+                            char *temp[count];
+                            line = strtok(copy, " ");
+                            for (int i = 0; i < count - 1; ++i) {
+                                temp[i] = line;
+                                line = strtok(NULL, " ");
+                            }
+                            temp[count - 1] = NULL;
+                            parseInput(command, args, &outfile, &infile, &append, &stderr_redirect, &background);
+                            executeExternalCommand(temp, outfile, infile, append, stderr_redirect, background,
+                                                   &last_exit_status, 0);
+                            free(copy);
                         }
                     } else {
-                        char *line = strtok(else_command, "\n");
-                        while (line != NULL) {
-                            parse_input(line, args, &append, &stderr_redirect, &outfile);
-                            execute_external_command(args, append, stderr_redirect, outfile, &last_exit_status);
-                            line = strtok(NULL, "\n");
+                        if (strchr(else_command, '|') != NULL) {
+                            executePipeline(else_command, &last_exit_status, 0);
+                        } else {
+                            int len = strlen(else_command);
+                            char *copy = malloc(len + 1);
+                            strcpy(copy, else_command);
+                            char *line = strtok(else_command, " ");
+                            int count = 0;
+                            while (line != NULL) {
+                                count++;
+                                line = strtok(NULL, " ");
+                            }
+                            char *temp[count];
+                            line = strtok(copy, " ");
+                            for (int i = 0; i < count - 1; ++i) {
+                                temp[i] = line;
+                                line = strtok(NULL, " ");
+                            }
+                            temp[count - 1] = NULL;
+
+                            parseInput(command, args, &outfile, &infile, &append, &stderr_redirect, &background);
+                            executeExternalCommand(temp, outfile, infile, append, stderr_redirect, background,
+                                                   &last_exit_status, 0);
+                            free(copy);
                         }
                     }
                     continue;
@@ -142,31 +194,33 @@ int main() {
             }
 
             if (strcmp(args[0], "prompt") == 0 && args[1] && strcmp(args[1], "=") == 0 && args[2]) {
-                change_prompt(args);
+                changePrompt(args);
                 continue;
             } else if (strcmp(args[0], "echo") == 0) {
                 if (args[1] != NULL && strcmp(args[1], "$?") == 0) {
                     printf("%d\n", last_exit_status);
                 } else {
-                    execute_echo(args);
+                    executeEcho(args);
                 }
             } else if (strcmp(args[0], "cd") == 0) {
-                execute_cd(args);
+                executeCd(args);
             } else if (strcmp(args[0], "read") == 0) {
-                execute_read_command(args, &var_array);
+                executeReadCommand(args, &var_array);
             } else if (strcmp(args[0], "quit") == 0) {
-                execute_exit();
+                executeQuit();
             } else {
-                execute_external_command(args, append, stderr_redirect, outfile, &last_exit_status);
+
+                executeExternalCommand(args, outfile, infile, append, stderr_redirect, background, &last_exit_status,
+                                       0);
             }
         }
     }
     return 0;
 }
 
-void setup_signal_handling() {
+void setupSignalHandling() {
     struct sigaction sa;
-    sa.sa_handler = sigint_handler;
+    sa.sa_handler = sigintHandler;
     sa.sa_flags = SA_RESTART;
     sigemptyset(&sa.sa_mask);
     if (sigaction(SIGINT, &sa, NULL) == -1) {
@@ -175,7 +229,7 @@ void setup_signal_handling() {
     }
 }
 
-void change_prompt(char **args) {
+void changePrompt(char **args) {
     // Clear the current prompt
     memset(prompt, 0, BUFFER_SIZE);
 
@@ -187,7 +241,7 @@ void change_prompt(char **args) {
     }
 }
 
-void execute_echo(char **args) {
+void executeEcho(char **args) {
     if (args == NULL || args[0] == NULL) {
         return;
     }
@@ -204,7 +258,7 @@ void execute_echo(char **args) {
     }
 }
 
-void execute_cd(char **args) {
+void executeCd(char **args) {
     if (args[1] == NULL) {
         fprintf(stderr, "cd: expected argument to \"cd\"\n");
     } else {
@@ -214,77 +268,124 @@ void execute_cd(char **args) {
     }
 }
 
-void parse_input(char *command, char **args, int *append, int *stderr_redirect, char **outfile) {
+int parseInput(char *input, char **args, char **outfile, char **infile, int *append, int *stderr_redirect,
+               int *background) {
+    int i = 0;
+    *outfile = NULL;
+    *infile = NULL;
     *append = 0;
     *stderr_redirect = 0;
-    int i = 0;
-    for (char *token = strtok(command, " "); token; token = strtok(NULL, " ")) {
-        if (!strcmp(token, "2>") && (i > 0)) {
-            *stderr_redirect = 1;
-            *outfile = strtok(NULL, " ");
-            break;
-        } else if (!strcmp(token, ">>") && (i > 0)) {
-            *append = 1;
-            *outfile = strtok(NULL, " ");
-            break;
+    *background = 0;
+
+    // Tokenize the input
+    char *token = strtok(input, " ");
+    while (token != NULL) {
+        if (strcmp(token, ">") == 0) {
+            token = strtok(NULL, " ");
+            if (token != NULL) {
+                *outfile = token;
+                *append = 0;
+            }
+        } else if (strcmp(token, ">>") == 0) {
+            token = strtok(NULL, " ");
+            if (token != NULL) {
+                *outfile = token;
+                *append = 1;
+            }
+        } else if (strcmp(token, "2>") == 0) {
+            token = strtok(NULL, " ");
+            if (token != NULL) {
+                *outfile = token;
+                *stderr_redirect = 1;
+            }
+        } else if (strcmp(token, "<") == 0) {
+            token = strtok(NULL, " ");
+            if (token != NULL) {
+                *infile = token;
+            }
+        } else if (strcmp(token, "&") == 0) {
+            *background = 1;
+        } else {
+            args[i++] = token;
         }
-        args[i++] = token;
+        token = strtok(NULL, " ");
     }
     args[i] = NULL;
+    return i;
 }
 
-void execute_exit() {
+
+void executeQuit() {
     exit(0);
 }
 
-void sigint_handler(int sig) {
+void sigintHandler(int sig) {
     write(STDOUT_FILENO, "You typed Control-C!\n", 21);
     write(STDOUT_FILENO, prompt, strlen(prompt));
 }
 
-void execute_external_command(char **args, int append, int stderr_redirect, char *outfile, int *last_exit_status) {
-    int fd;
+void executeExternalCommand(char **args, char *outfile, char *infile, int append, int stderr_redirect, int background,
+                            int *last_exit_status, int silent) {
     pid_t pid = fork();
     if (pid == 0) {  // Child process
-        // Redirection logic
-        if (stderr_redirect) {
-            fd = open(outfile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-            if (fd == -1) {
-                fprintf(stderr, "Failed to open file %s: %s\n", outfile, strerror(errno));
+        if (silent) {
+            int fd_null = open("/dev/null", O_WRONLY);
+            if (fd_null == -1) {
+                perror("open");
                 exit(EXIT_FAILURE);
             }
-            dup2(fd, STDERR_FILENO);
+            dup2(fd_null, STDOUT_FILENO);
+            dup2(fd_null, STDERR_FILENO);
+            close(fd_null);
+        }
+
+        if (outfile != NULL) {
+            int fd;
+            if (append) {
+                fd = open(outfile, O_WRONLY | O_CREAT | O_APPEND, 0644);
+            } else {
+                fd = open(outfile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            }
+            if (fd == -1) {
+                perror("open");
+                exit(EXIT_FAILURE);
+            }
+            if (stderr_redirect) {
+                dup2(fd, STDERR_FILENO);
+            } else {
+                dup2(fd, STDOUT_FILENO);
+            }
             close(fd);
         }
-        if (append) {
-            fd = open(outfile, O_WRONLY | O_CREAT | O_APPEND, 0666);
+
+        if (infile != NULL) {
+            int fd = open(infile, O_RDONLY);
             if (fd == -1) {
-                fprintf(stderr, "Failed to open file %s: %s\n", outfile, strerror(errno));
+                perror("open");
                 exit(EXIT_FAILURE);
             }
-            dup2(fd, STDOUT_FILENO);
+            dup2(fd, STDIN_FILENO);
             close(fd);
         }
 
         if (execvp(args[0], args) == -1) {
-            fprintf(stderr, "Failed to execute %s: %s\n", args[0], strerror(errno));
+            perror("execvp");
             exit(EXIT_FAILURE);
         }
     } else if (pid > 0) {  // Parent process
-        int status;
-        waitpid(pid, &status, 0);
-        status = WEXITSTATUS(status);
-        *last_exit_status = status;
-
+        if (!background) {
+            waitpid(pid, last_exit_status, 0);
+        }
     } else {
-        fprintf(stderr, "Failed to fork: %s\n", strerror(errno));
+        perror("fork");
     }
 }
 
-void execute_pipeline(char *command, int *last_exit_status, int silent) {
-    printf("heyyy\n");
+
+void executePipeline(char *command, int *last_exit_status, int silent) {
     char *commands[BUFFER_SIZE];
     int num_pipes = 0;
+    int background = 0;
 
     commands[num_pipes++] = strtok(command, "|");
     while ((commands[num_pipes] = strtok(NULL, "|")) != NULL) {
@@ -350,7 +451,8 @@ void execute_pipeline(char *command, int *last_exit_status, int silent) {
             char *args[MAX_ARGS];
             int append = 0, stderr_redirect = 0;
             char *outfile = NULL;
-            parse_input(commands[i], args, &append, &stderr_redirect, &outfile);
+            char *infile = NULL;
+            parseInput(command, args, &outfile, &infile, &append, &stderr_redirect, &background);
             if (execvp(args[0], args) < 0) {
                 perror(args[0]);
                 free(pipefds);
@@ -387,18 +489,18 @@ void execute_pipeline(char *command, int *last_exit_status, int silent) {
     free(pipefds);
 }
 
-void init_variable_array(VariableArray *array) {
+void initVariableArray(VariableArray *array) {
     array->size = 0;
     array->capacity = INITIAL_VAR_CAPACITY;
     array->variables = malloc(sizeof(Variable) * array->capacity);
 }
 
-void resize_variable_array(VariableArray *array) {
+void resizeVariableArray(VariableArray *array) {
     array->capacity *= 2;
     array->variables = realloc(array->variables, sizeof(Variable) * array->capacity);
 }
 
-void set_variable(VariableArray *array, const char *name, const char *value) {
+void setVariable(VariableArray *array, const char *name, const char *value) {
     for (int i = 0; i < array->size; i++) {
         if (strcmp(array->variables[i].name, name) == 0) {
             free(array->variables[i].value);
@@ -407,14 +509,14 @@ void set_variable(VariableArray *array, const char *name, const char *value) {
         }
     }
     if (array->size == array->capacity) {
-        resize_variable_array(array);
+        resizeVariableArray(array);
     }
     array->variables[array->size].name = strdup(name);
     array->variables[array->size].value = strdup(value);
     array->size++;
 }
 
-char *get_variable(VariableArray *array, const char *name) {
+char *getVariable(VariableArray *array, const char *name) {
     for (int i = 0; i < array->size; i++) {
         if (strcmp(array->variables[i].name, name) == 0) {
             return array->variables[i].value;
@@ -423,7 +525,7 @@ char *get_variable(VariableArray *array, const char *name) {
     return NULL;
 }
 
-void substitute_variables(char *command, VariableArray *var_array) {
+void substituteVariables(char *command, VariableArray *var_array) {
     char buffer[BUFFER_SIZE];
     char *ptr = command;
     char *buf_ptr = buffer;
@@ -439,7 +541,7 @@ void substitute_variables(char *command, VariableArray *var_array) {
             }
             *var_ptr = '\0';
 
-            char *value = get_variable(var_array, var_name);
+            char *value = getVariable(var_array, var_name);
             if (value) {
                 while (*value) {
                     *buf_ptr++ = *value++;
@@ -459,7 +561,7 @@ void substitute_variables(char *command, VariableArray *var_array) {
     strcpy(command, buffer);
 }
 
-void execute_read_command(char **args, VariableArray *var_array) {
+void executeReadCommand(char **args, VariableArray *var_array) {
     if (args[1] == NULL) {
         fprintf(stderr, "read: missing variable name\n");
         return;
@@ -468,18 +570,18 @@ void execute_read_command(char **args, VariableArray *var_array) {
     char input[BUFFER_SIZE];
     if (fgets(input, sizeof(input), stdin) != NULL) {
         input[strcspn(input, "\n")] = 0;  // Remove newline character
-        set_variable(var_array, args[1], input);
+        setVariable(var_array, args[1], input);
     } else {
         fprintf(stderr, "read: failed to read input\n");
     }
 }
 
-void print_prompt() {
+void printPrompt() {
     printf("\r%s ", prompt);
     fflush(stdout);
 }
 
-void add_to_history(const char *command) {
+void addToHistory(const char *command) {
     if (history_index < MAX_HISTORY_SIZE) {
         strcpy(history[history_index++], command);
     } else {
@@ -491,7 +593,6 @@ void add_to_history(const char *command) {
     }
     current_history_pos = history_index;
 }
-
 void enableRawMode() {
     struct termios raw;
     tcgetattr(STDIN_FILENO, &raw);
@@ -506,7 +607,7 @@ void disableRawMode() {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
 
-void handle_arrow_key(char direction, char *buffer, int *index) {
+void handleArrowKey(char direction, char *buffer, int *index) {
     if (direction == 'A') {  // Up arrow
         if (current_history_pos > 0) {
             current_history_pos--;
@@ -514,7 +615,7 @@ void handle_arrow_key(char direction, char *buffer, int *index) {
             *index = strlen(buffer);
             // Clear the current line
             printf("\33[2K\r");
-            print_prompt();
+            printPrompt();
             printf("%s", buffer);
             fflush(stdout);
         }
@@ -525,7 +626,7 @@ void handle_arrow_key(char direction, char *buffer, int *index) {
             *index = strlen(buffer);
             // Clear the current line
             printf("\33[2K\r");
-            print_prompt();
+            printPrompt();
             printf("%s", buffer);
             fflush(stdout);
         } else if (current_history_pos == history_index - 1) {
@@ -534,13 +635,14 @@ void handle_arrow_key(char direction, char *buffer, int *index) {
             *index = 0;
             // Clear the current line
             printf("\33[2K\r");
-            print_prompt();
+            printPrompt();
             fflush(stdout);
         }
     }
 }
 
-int read_input(char *buffer) {
+
+int readInput(char *buffer) {
     enableRawMode();
 
     int index = 0;
@@ -562,7 +664,7 @@ int read_input(char *buffer) {
         } else if (c == 27) {  // Escape sequence
             if (getchar() == '[') {
                 c = getchar();
-                handle_arrow_key(c, buffer, &index);
+                handleArrowKey(c, buffer, &index);
                 continue;
             }
         } else {
